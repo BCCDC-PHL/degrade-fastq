@@ -1,0 +1,152 @@
+#!/usr/bin/env python3
+
+import argparse
+import gzip
+import json
+import math
+import random
+
+
+def inverted_sigmoid(x, slope=1.0, shift=0):
+    """
+    Use this site to get intuition on how this function works:
+    https://www.desmos.com/calculator
+    """
+    return 1 - (1 / (1 + math.exp((-(x - shift)) * slope)))
+
+
+def char_to_phred(c, offset=33):
+    """
+    """
+    p = ord(c) - offset
+
+    return p
+
+
+def phred_to_char(p, offset=33):
+    """
+    """
+    c = chr(p + offset)
+
+    return c
+
+
+def phred_to_probability_error(p):
+    """
+    """
+    probability_error = 10**(-p/10)
+
+    return probability_error
+
+
+def parse_fastq_gzipped(fastq_path):
+    """
+    """
+    line_count = 0
+    read = {}
+    with gzip.open(fastq_path, 'r') as f:
+        for line in f:
+            line = line.decode().strip()
+            if line_count == 0:
+                read['header'] = line
+            elif line_count == 1:
+                read['seq'] = line
+            elif line_count == 3:
+                read['qual'] = line
+                read['qual_phred'] = list(map(char_to_phred, line))
+                read['probability_error'] = list(map(phred_to_probability_error, read['qual_phred']))
+            line_count += 1
+            line_count = line_count % 4
+            if line_count == 0:
+                yield read
+
+
+def parse_fastq_plaintext(fastq_path):
+    """
+    """
+    line_count = 0
+    read = {}
+    with open(fastq_path, 'r') as f:
+        for line in f:
+            line = line.strip()
+            if line_count == 0:
+                read['header'] = line
+            elif line_count == 1:
+                read['seq'] = line
+            elif line_count == 3:
+                read['qual'] = line
+                read['qual_phred'] = list(map(char_to_phred, line))
+            line_count += 1
+            line_count = line_count % 4
+            if line_count == 0:
+                yield read
+
+
+def degrade_read(read, degradation_slope=0.5, degradation_threshold=25, degradation_intensity=10):
+    """
+    """
+    # print('original_seq:', read['seq'])
+    bases = list(read['seq'])
+    phred_scores = read['qual_phred']
+    for pos in range(len(bases)):
+        phred = read['qual_phred'][pos]
+        inverted_sigmoid_value =  inverted_sigmoid(phred, slope=degradation_slope, shift=degradation_threshold)
+        random_value = random.random()
+        if random_value > inverted_sigmoid_value:
+            quality_degradation_value = round(random.uniform(0, degradation_intensity))
+            old_phred_score = phred_scores[pos]
+            phred_scores[pos] -= quality_degradation_value
+            new_phred_score = phred_scores[pos]
+            if new_phred_score < 0:
+                new_phred_score = 0
+            old_probability_error = phred_to_probability_error(old_phred_score)
+            new_probability_error = phred_to_probability_error(new_phred_score)
+            original_base = bases[pos]
+            new_base = None
+            should_mutate = random.random() < new_probability_error
+            if should_mutate:
+                new_base = random.choice(['a', 'c', 'g', 't'])
+                bases[pos] = new_base
+                # print("\t".join(map(str, ["position:", pos, "old_phred_score:", old_phred_score, "new_phred_score:", new_phred_score, "old_probability_error:", round(old_probability_error, 4), "new_probability_error:", round(new_probability_error, 4), "original_base:", original_base, "new_base:", new_base])))
+    read['seq'] = ''.join(bases)
+    read['qual_phred'] = phred_scores
+    # print('degraded_seq:', read['seq'])
+    return read
+
+
+def print_read(read):
+    print(read['header'])
+    print(read['seq'])
+    print('+')
+    print(''.join(map(phred_to_char, read['qual_phred'])))
+    
+
+def main(args):
+    r1_is_gzipped = False
+    r2_is_gzipped = False
+    if args.R1.endswith('.gz'):
+        r1_is_gzipped = True
+    if args.R2.endswith('.gz'):
+        r2_is_gzipped = True
+
+    if r1_is_gzipped:
+        for read in parse_fastq_gzipped(args.R1):
+            if random.random() < args.proportion_reads_degraded:
+                read = degrade_read(read, args.degradation_slope, args.degradation_threshold, args.degradation_intensity)
+                print_read(read)
+            else:
+                # print("skipped_read")
+                print_read(read)
+                pass
+    
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-1', '--R1')
+    parser.add_argument('-2', '--R2')
+    parser.add_argument('-p', '--proportion-reads-degraded', type=float, default=0.10)
+    parser.add_argument('-t', '--degradation-threshold', type=float, default=25.0)
+    parser.add_argument('-s', '--degradation-slope', type=float, default=1.0)
+    parser.add_argument('-i', '--degradation-intensity', type=float, default=10.0)
+    args = parser.parse_args()
+    main(args)
