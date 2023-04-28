@@ -54,7 +54,6 @@ def parse_fastq_gzipped(fastq_path):
             elif line_count == 3:
                 read['qual'] = line
                 read['qual_phred'] = list(map(char_to_phred, line))
-                read['probability_error'] = list(map(phred_to_probability_error, read['qual_phred']))
             line_count += 1
             line_count = line_count % 4
             if line_count == 0:
@@ -95,10 +94,10 @@ def degrade_read(read, degradation_slope=0.5, degradation_threshold=25, degradat
         if random_value > inverted_sigmoid_value:
             quality_degradation_value = round(random.uniform(0, degradation_intensity))
             old_phred_score = phred_scores[pos]
-            phred_scores[pos] -= quality_degradation_value
-            new_phred_score = phred_scores[pos]
+            new_phred_score = old_phred_score - quality_degradation_value
             if new_phred_score < 0:
                 new_phred_score = 0
+            phred_scores[pos] = new_phred_score
             old_probability_error = phred_to_probability_error(old_phred_score)
             new_probability_error = phred_to_probability_error(new_phred_score)
             original_base = bases[pos]
@@ -115,6 +114,8 @@ def degrade_read(read, degradation_slope=0.5, degradation_threshold=25, degradat
 
 
 def print_read(read):
+    """
+    """
     print(read['header'])
     print(read['seq'])
     print('+')
@@ -122,6 +123,7 @@ def print_read(read):
     
 
 def main(args):
+    
     r1_is_gzipped = False
     r2_is_gzipped = False
     if args.R1.endswith('.gz'):
